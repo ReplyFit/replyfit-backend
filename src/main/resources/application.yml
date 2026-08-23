@@ -69,6 +69,11 @@ replyfit:
     model: ${REPLYFIT_AI_MODEL:gpt-5-mini}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  seed:
+    demo: ${REPLYFIT_SEED_DEMO:true}
+  data-retention:
+    # 개인정보 최소 보관 원칙 — 기본 180일 경과 문의/리뷰 자동 삭제
+    days: ${REPLYFIT_RETENTION_DAYS:180}
 
 logging:
   level:
