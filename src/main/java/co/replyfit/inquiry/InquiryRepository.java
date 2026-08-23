@@ -17,7 +17,9 @@ public interface InquiryRepository extends JpaRepository<Inquiry, Long> {
             where i.user.id = :userId
               and (:category is null or i.category = :category)
               and (:status is null or i.status = :status)
-              and (:q is null or i.content like concat('%', :q, '%') or i.productName like concat('%', :q, '%'))
+              and (:q is null
+                   or i.content like concat('%', cast(:q as string), '%')
+                   or i.productName like concat('%', cast(:q as string), '%'))
             order by i.receivedAt desc
             """)
     Page<Inquiry> search(@Param("userId") Long userId,
