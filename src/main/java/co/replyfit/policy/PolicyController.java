@@ -19,6 +19,8 @@ import co.replyfit.auth.AuthUser;
 import co.replyfit.common.ApiException;
 import co.replyfit.user.User;
 import co.replyfit.user.UserRepository;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -30,6 +32,7 @@ import jakarta.validation.constraints.Size;
  */
 @RestController
 @RequestMapping("/api/policies")
+@Tag(name = "02. 스토어 정책", description = "AI 답변 초안은 여기 등록된 정책 문구만 인용합니다. 유형: SHIPPING(배송)·EXCHANGE_RETURN(교환/반품)·SIZE_GUIDE(사이즈)·RESTOCK(재입고)·GENERAL(일반)")
 public class PolicyController {
 
     public record PolicyRequest(
@@ -55,12 +58,14 @@ public class PolicyController {
         this.userRepository = userRepository;
     }
 
+    @Operation(summary = "내 정책 목록 조회")
     @GetMapping
     public ResponseEntity<List<PolicyResponse>> list(@AuthenticationPrincipal AuthUser me) {
         return ResponseEntity.ok(policyRepository.findByUserIdOrderByTypeAscUpdatedAtDesc(me.id())
                 .stream().map(PolicyResponse::from).toList());
     }
 
+    @Operation(summary = "정책 등록", description = "등록 즉시 다음 초안 생성부터 인용 대상이 됩니다.")
     @PostMapping
     @Transactional
     public ResponseEntity<PolicyResponse> create(@AuthenticationPrincipal AuthUser me,
@@ -72,6 +77,7 @@ public class PolicyController {
         return ResponseEntity.ok(PolicyResponse.from(policy));
     }
 
+    @Operation(summary = "정책 수정")
     @PutMapping("/{id}")
     @Transactional
     public ResponseEntity<PolicyResponse> update(@AuthenticationPrincipal AuthUser me,
@@ -82,6 +88,7 @@ public class PolicyController {
         return ResponseEntity.ok(PolicyResponse.from(policy));
     }
 
+    @Operation(summary = "정책 삭제")
     @DeleteMapping("/{id}")
     @Transactional
     public ResponseEntity<Void> delete(@AuthenticationPrincipal AuthUser me, @PathVariable Long id) {
