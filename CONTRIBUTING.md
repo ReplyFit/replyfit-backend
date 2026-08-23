@@ -75,4 +75,6 @@ Closes #6
 
 - 하나의 PR은 하나의 이슈(기능)만 다룹니다 — 리뷰 가능한 크기 유지
 - PR 본문에 설계 결정·트레이드오프를 남깁니다 (나중에 "왜 이렇게 했지"의 답)
-- CI가 없는 동안은 로컬에서 `./gradlew compileJava` (백엔드) / `npm run build` (프론트) 통과 확인 후 푸시
+- 모든 PR에 CI(GitHub Actions)가 자동으로 빌드·테스트를 수행합니다 — **CI 통과 후 머지**
+- 푸시 전 로컬 확인 권장: `./gradlew test` (백엔드) / `npm run test && npm run build` (프론트)
+- `v*` 태그를 푸시하면 CI가 GHCR에 Docker 이미지를 자동 발행합니다
