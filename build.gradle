@@ -36,6 +36,9 @@ dependencies {
     // CSV 파싱 (문의·리뷰 업로드)
     implementation 'org.apache.commons:commons-csv:1.14.1'
 
+    // AI 계층 — OpenAI 공식 Java SDK
+    implementation 'com.openai:openai-java:4.52.0'
+
     // OpenAPI (Swagger UI)
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
 
