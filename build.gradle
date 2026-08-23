@@ -43,6 +43,11 @@ dependencies {
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // 실제 PostgreSQL 컨테이너 기반 리포지토리 테스트 (검색 쿼리 회귀 방지)
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {

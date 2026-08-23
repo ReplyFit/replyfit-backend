@@ -47,6 +47,11 @@ public class RuleBasedLlmClient implements LlmClient {
                     hits++;
                 }
             }
+            // 교환/반품 의도는 강한 신호 — "색상이 달라 교환 원해요"처럼 다른 카테고리
+            // 키워드와 함께 나와도 실제 처리(반품 안내)가 필요한 문의로 우선 분류한다.
+            if (entry.getKey() == InquiryCategory.EXCHANGE_RETURN) {
+                hits *= 2;
+            }
             if (hits > bestHits) {
                 bestHits = hits;
                 best = entry.getKey();
