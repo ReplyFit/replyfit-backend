@@ -37,7 +37,12 @@ dependencies {
     implementation 'org.apache.commons:commons-csv:1.14.1'
 
     // AI 계층 — OpenAI 공식 Java SDK
-    implementation 'com.openai:openai-java:4.52.0'
+    // victools를 통해 구버전 swagger-annotations(non-jakarta)가 딸려 와
+    // springdoc의 2.2.4x와 동일 클래스명이 충돌(NoSuchMethodError: Schema.$dynamicRef)
+    // → 제외하면 springdoc의 swagger-annotations-jakarta(동일 FQCN)가 대신 해석된다.
+    implementation('com.openai:openai-java:4.52.0') {
+        exclude group: 'io.swagger.core.v3', module: 'swagger-annotations'
+    }
 
     // OpenAPI (Swagger UI)
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
