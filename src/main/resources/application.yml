@@ -63,6 +63,10 @@ replyfit:
     secret: ${JWT_SECRET:replyfit-dev-secret-key-please-change-in-production-0123456789abcdef}
     access-token-validity-minutes: ${JWT_ACCESS_MINUTES:30}
     refresh-token-validity-days: ${JWT_REFRESH_DAYS:14}
+  ai:
+    # openai | rule-based  (OPENAI_API_KEY 미설정 시 자동으로 rule-based 폴백)
+    provider: ${REPLYFIT_AI_PROVIDER:openai}
+    model: ${REPLYFIT_AI_MODEL:gpt-5-mini}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
