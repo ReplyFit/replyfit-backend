@@ -56,6 +56,10 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+    # 태그 번호순 정렬 + 접힌 상태로 시작 — 훑어보기 쉽게
+    tags-sorter: alpha
+    operations-sorter: method
+    doc-expansion: none
 
 replyfit:
   jwt:

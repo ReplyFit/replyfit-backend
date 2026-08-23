@@ -14,9 +14,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import co.replyfit.auth.AuthUser;
 import co.replyfit.inquiry.dto.InquiryDtos.PageResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/reviews")
+@Tag(name = "07. 리뷰", description = "상품 리뷰 조회 — 감성(POSITIVE·NEUTRAL·NEGATIVE)과 이슈 키워드는 업로드 시 자동 태깅되며 주간 VOC 리포트의 재료가 됩니다.")
 public class ReviewController {
 
     public record ReviewItem(Long id, String productName, int rating, String content,
@@ -46,9 +50,11 @@ public class ReviewController {
         this.reviewRepository = reviewRepository;
     }
 
+    @Operation(summary = "리뷰 목록 조회 (감성 필터·검색·페이징)")
     @GetMapping
     public ResponseEntity<PageResponse<ReviewItem>> list(
             @AuthenticationPrincipal AuthUser me,
+            @Parameter(description = "감성 필터: POSITIVE·NEUTRAL·NEGATIVE")
             @RequestParam(required = false) String sentiment,
             @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "0") int page,
@@ -70,6 +76,7 @@ public class ReviewController {
                 result.getTotalElements(), result.getTotalPages()));
     }
 
+    @Operation(summary = "리뷰 요약 (전체 건수·평균 평점·부정 건수)")
     @GetMapping("/summary")
     public ResponseEntity<ReviewSummary> summary(@AuthenticationPrincipal AuthUser me) {
         return ResponseEntity.ok(new ReviewSummary(

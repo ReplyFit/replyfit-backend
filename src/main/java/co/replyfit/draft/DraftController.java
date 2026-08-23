@@ -14,6 +14,8 @@ import co.replyfit.auth.AuthUser;
 import co.replyfit.common.ApiException;
 import co.replyfit.dashboard.DashboardCache;
 import co.replyfit.inquiry.InquiryStatus;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 
@@ -23,6 +25,7 @@ import jakarta.validation.constraints.NotBlank;
  */
 @RestController
 @RequestMapping("/api/drafts")
+@Tag(name = "06. 답변 초안", description = "AI 초안의 셀러 승인 흐름 — 수정 → 승인 → 복사 후 판매 채널에서 직접 발송 → 발송 완료 표시. AI는 직접 발송하지 않습니다.")
 public class DraftController {
 
     public record EditRequest(@NotBlank String content) {
@@ -39,6 +42,7 @@ public class DraftController {
         this.dashboardCache = dashboardCache;
     }
 
+    @Operation(summary = "초안 수정", description = "셀러가 내용을 고칩니다. AI 원본(aiContent)은 그대로 보존됩니다.")
     @PutMapping("/{id}")
     @Transactional
     public ResponseEntity<DraftActionResponse> edit(@AuthenticationPrincipal AuthUser me,
@@ -50,6 +54,7 @@ public class DraftController {
                 draft.getId(), draft.getInquiry().getStatus().name(), "초안이 수정되었습니다."));
     }
 
+    @Operation(summary = "초안 승인", description = "문의 상태가 APPROVED로 전환됩니다. 이후 복사해서 판매 채널에 발송하세요.")
     @PostMapping("/{id}/approve")
     @Transactional
     public ResponseEntity<DraftActionResponse> approve(@AuthenticationPrincipal AuthUser me,
@@ -63,6 +68,7 @@ public class DraftController {
                 "초안이 승인되었습니다. 복사해서 판매 채널에 발송해 주세요."));
     }
 
+    @Operation(summary = "발송 완료 표시", description = "승인된 초안만 가능합니다(미승인 시 400). 문의 상태가 SENT로 전환됩니다.")
     @PostMapping("/{id}/mark-sent")
     @Transactional
     public ResponseEntity<DraftActionResponse> markSent(@AuthenticationPrincipal AuthUser me,
