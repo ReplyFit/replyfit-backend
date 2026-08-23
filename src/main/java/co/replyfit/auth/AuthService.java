@@ -8,6 +8,9 @@ import co.replyfit.auth.dto.AuthDtos.LoginRequest;
 import co.replyfit.auth.dto.AuthDtos.SignupRequest;
 import co.replyfit.auth.dto.AuthDtos.TokenResponse;
 import co.replyfit.auth.dto.AuthDtos.UserResponse;
+import co.replyfit.billing.PlanType;
+import co.replyfit.billing.Subscription;
+import co.replyfit.billing.SubscriptionRepository;
 import co.replyfit.common.ApiException;
 import co.replyfit.user.User;
 import co.replyfit.user.UserRepository;
@@ -16,17 +19,20 @@ import co.replyfit.user.UserRepository;
 public class AuthService {
 
     private final UserRepository userRepository;
+    private final SubscriptionRepository subscriptionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RefreshTokenStore refreshTokenStore;
     private final LoginRateLimiter rateLimiter;
 
     public AuthService(UserRepository userRepository,
+                       SubscriptionRepository subscriptionRepository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
                        RefreshTokenStore refreshTokenStore,
                        LoginRateLimiter rateLimiter) {
         this.userRepository = userRepository;
+        this.subscriptionRepository = subscriptionRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.refreshTokenStore = refreshTokenStore;
@@ -43,6 +49,8 @@ public class AuthService {
                 passwordEncoder.encode(request.password()),
                 request.name(),
                 request.storeName()));
+        // 가입 시 Starter 무료 체험 구독 생성
+        subscriptionRepository.save(new Subscription(user, PlanType.STARTER, Subscription.Status.TRIAL, null));
         return issueTokens(user);
     }
 
