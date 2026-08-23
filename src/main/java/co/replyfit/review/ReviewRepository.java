@@ -16,7 +16,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
             select r from Review r
             where r.user.id = :userId
               and (:sentiment is null or r.sentiment = :sentiment)
-              and (:q is null or r.content like concat('%', :q, '%') or r.productName like concat('%', :q, '%'))
+              and (:q is null
+                   or r.content like concat('%', cast(:q as string), '%')
+                   or r.productName like concat('%', cast(:q as string), '%'))
             order by r.writtenAt desc
             """)
     Page<Review> search(@Param("userId") Long userId,
