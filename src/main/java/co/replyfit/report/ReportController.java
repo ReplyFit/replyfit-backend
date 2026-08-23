@@ -20,9 +20,12 @@ import co.replyfit.auth.AuthUser;
 import co.replyfit.common.ApiException;
 import co.replyfit.kafka.EventPublisher;
 import co.replyfit.kafka.event.ReportRequestedEvent;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/api/reports")
+@Tag(name = "09. VOC 리포트", description = "주간 VOC 리포트 — 반품 사유 TOP5, 문제 상품, 상세페이지 문구 제안, AI 인사이트 (문의+리뷰 통합 분석)")
 public class ReportController {
 
     public record ReportListItem(Long id, LocalDate weekStart, LocalDate weekEnd,
@@ -58,12 +61,15 @@ public class ReportController {
         this.objectMapper = objectMapper;
     }
 
+    @Operation(summary = "리포트 목록 조회 (최신 주 우선)")
     @GetMapping
     public ResponseEntity<List<ReportListItem>> list(@AuthenticationPrincipal AuthUser me) {
         return ResponseEntity.ok(reportRepository.findByUserIdOrderByWeekStartDesc(me.id())
                 .stream().map(ReportListItem::from).toList());
     }
 
+    @Operation(summary = "리포트 상세 조회",
+            description = "status가 READY일 때 payload(요약·카테고리 분포·반품 사유 TOP5·문제 상품·문구 제안·AI 인사이트)가 채워집니다. GENERATING이면 3초 간격 폴링을 권장합니다.")
     @GetMapping("/{id}")
     public ResponseEntity<ReportDetail> detail(@AuthenticationPrincipal AuthUser me,
                                                @PathVariable Long id) {
@@ -81,6 +87,8 @@ public class ReportController {
     }
 
     /** 주간 리포트 생성 요청 → Kafka 워커가 비동기로 집계 + AI 인사이트 생성 */
+    @Operation(summary = "주간 리포트 생성 요청 (비동기)",
+            description = "weekStart 미지정 시 이번 주(월요일 기준). 같은 주 리포트가 이미 READY면 재생성하지 않고 기존 ID를 반환합니다.")
     @PostMapping("/generate")
     public ResponseEntity<GenerateResponse> generate(@AuthenticationPrincipal AuthUser me,
                                                      @RequestBody(required = false) GenerateRequest request) {
