@@ -49,7 +49,9 @@ public class OpenAiLlmClient implements LlmClient {
                     .addSystemMessage(PromptTemplates.CLASSIFY_SYSTEM)
                     .addUserMessage(PromptTemplates.classifyUser(productName, content))
                     .build();
-            String text = firstText(client.chat().completions().create(params));
+            ChatCompletion completion = client.chat().completions().create(params);
+            logUsage("classify", completion);
+            String text = firstText(completion);
             JsonNode json = extractJson(text);
             if (json == null) {
                 return fallback.classify(productName, content);
@@ -72,7 +74,9 @@ public class OpenAiLlmClient implements LlmClient {
                     .addSystemMessage(PromptTemplates.DRAFT_SYSTEM)
                     .addUserMessage(PromptTemplates.draftUser(ctx))
                     .build();
-            String text = firstText(client.chat().completions().create(params));
+            ChatCompletion completion = client.chat().completions().create(params);
+            logUsage("draft", completion);
+            String text = firstText(completion);
             JsonNode json = extractJson(text);
             if (json != null && json.hasNonNull("draft")) {
                 List<Long> cited = new ArrayList<>();
@@ -99,7 +103,9 @@ public class OpenAiLlmClient implements LlmClient {
                     .addSystemMessage(PromptTemplates.REPORT_SYSTEM)
                     .addUserMessage(PromptTemplates.reportUser(aggregateJson))
                     .build();
-            String text = firstText(client.chat().completions().create(params));
+            ChatCompletion completion = client.chat().completions().create(params);
+            logUsage("report", completion);
+            String text = firstText(completion);
             if (text == null || text.isBlank()) {
                 return fallback.reportInsights(aggregateJson);
             }
@@ -113,6 +119,13 @@ public class OpenAiLlmClient implements LlmClient {
     @Override
     public String name() {
         return "openai:" + model;
+    }
+
+    /** 호출당 토큰 사용량 — 운영 비용 모니터링용. 문의 1건당 2줄(분류·초안) 수준이라 볼륨 부담 없음. */
+    private static void logUsage(String op, ChatCompletion completion) {
+        completion.usage().ifPresent(usage -> log.info(
+                "OpenAI {} usage: prompt={} completion={} total={}",
+                op, usage.promptTokens(), usage.completionTokens(), usage.totalTokens()));
     }
 
     private static String firstText(ChatCompletion completion) {
