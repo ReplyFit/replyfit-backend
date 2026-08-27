@@ -66,9 +66,4 @@ public class User {
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
-
-    public void updateProfile(String name, String storeName) {
-        this.name = name;
-        this.storeName = storeName;
-    }
 }
