@@ -2,7 +2,6 @@ package co.replyfit.report;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,11 +30,19 @@ import co.replyfit.user.UserRepository;
  *
  * 문의와 리뷰를 함께 분석해 반품 사유 TOP5, 문제 상품,
  * 수정할 상세페이지 문구까지 제시한다.
+ *
+ * 집계 결과는 프론트가 소비하는 JSON 계약이므로 레코드로 표현한다
+ * (Jackson이 컴포넌트명 그대로 직렬화 — 키 오타가 컴파일에 잡힌다).
  */
 @Service
 public class ReportService {
 
     private static final Logger log = LoggerFactory.getLogger(ReportService.class);
+
+    /** 문제 상품·문구 제안에 노출할 상품 수 */
+    private static final int PROBLEM_PRODUCT_LIMIT = 3;
+    /** 반품 사유 노출 개수 */
+    private static final int RETURN_REASON_LIMIT = 5;
 
     private final WeeklyReportRepository reportRepository;
     private final InquiryRepository inquiryRepository;
@@ -58,18 +65,56 @@ public class ReportService {
         this.objectMapper = objectMapper;
     }
 
+    /* ---------- 프론트가 소비하는 payload 계약 ---------- */
+
+    public record CategorySlice(String category, String label, long count) {
+    }
+
+    public record ReturnReason(String reason, long count) {
+    }
+
+    /** averageRating은 리뷰가 없는 상품에서 null (프론트 계약: number | null) */
+    public record ProblemProduct(String productName, long negativeCount,
+                                 Double averageRating, String topIssue) {
+    }
+
+    public record CopySuggestion(String productName, String suggestion) {
+    }
+
+    public record Summary(int totalInquiries, int totalReviews, double averageRating,
+                          long negativeReviews, String topCategory) {
+    }
+
+    public record Aggregates(String weekStart, String weekEnd, Summary summary,
+                             List<CategorySlice> categoryDistribution,
+                             List<ReturnReason> returnReasonsTop5,
+                             List<ProblemProduct> problemProducts,
+                             List<CopySuggestion> copySuggestions) {
+    }
+
+    /** 집계에 AI 인사이트를 얹은 최종 저장 형태 */
+    public record Payload(String weekStart, String weekEnd, Summary summary,
+                          List<CategorySlice> categoryDistribution,
+                          List<ReturnReason> returnReasonsTop5,
+                          List<ProblemProduct> problemProducts,
+                          List<CopySuggestion> copySuggestions,
+                          String aiInsights, String generatedBy) {
+
+        static Payload of(Aggregates a, String aiInsights, String generatedBy) {
+            return new Payload(a.weekStart(), a.weekEnd(), a.summary(),
+                    a.categoryDistribution(), a.returnReasonsTop5(),
+                    a.problemProducts(), a.copySuggestions(), aiInsights, generatedBy);
+        }
+    }
+
+    /* ---------- 공개 API ---------- */
+
     @Transactional
     public WeeklyReport createPending(Long userId, LocalDate weekStart) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> ApiException.notFound("사용자를 찾을 수 없습니다."));
         LocalDate normalizedStart = weekStart.with(java.time.DayOfWeek.MONDAY);
         return reportRepository.findByUserIdAndWeekStart(userId, normalizedStart)
-                .map(existing -> {
-                    if (existing.getStatus() == WeeklyReport.Status.READY) {
-                        return existing;
-                    }
-                    return existing;
-                })
                 .orElseGet(() -> reportRepository.save(
                         new WeeklyReport(user, normalizedStart, normalizedStart.plusDays(6))));
     }
@@ -80,43 +125,58 @@ public class ReportService {
         WeeklyReport report = reportRepository.findById(reportId)
                 .orElseThrow(() -> ApiException.notFound("리포트를 찾을 수 없습니다."));
         try {
-            Map<String, Object> payload = buildAggregates(
+            Aggregates aggregates = buildAggregates(
                     report.getUser().getId(), report.getWeekStart(), report.getWeekEnd());
-            String aggregateJson = objectMapper.writeValueAsString(payload);
             String insights = insightsOverride != null
                     ? insightsOverride
-                    : llmClient.reportInsights(aggregateJson);
-            payload.put("aiInsights", insights);
-            payload.put("generatedBy", insightsOverride != null ? "seed" : llmClient.name());
-            report.complete(objectMapper.writeValueAsString(payload));
+                    : llmClient.reportInsights(objectMapper.writeValueAsString(aggregates));
+            String generatedBy = insightsOverride != null ? "seed" : llmClient.name();
+            report.complete(objectMapper.writeValueAsString(
+                    Payload.of(aggregates, insights, generatedBy)));
         } catch (Exception e) {
             log.error("Report generation failed for reportId={}", reportId, e);
             report.fail();
         }
     }
 
-    Map<String, Object> buildAggregates(Long userId, LocalDate weekStart, LocalDate weekEnd) {
+    /* ---------- 집계 ---------- */
+
+    Aggregates buildAggregates(Long userId, LocalDate weekStart, LocalDate weekEnd) {
         LocalDateTime from = weekStart.atStartOfDay();
         LocalDateTime to = weekEnd.plusDays(1).atStartOfDay();
         List<Inquiry> inquiries = inquiryRepository.findByUserIdAndReceivedAtBetween(userId, from, to);
         List<Review> reviews = reviewRepository.findByUserIdAndWrittenAtBetween(userId, from, to);
 
-        // 1) 카테고리 분포
-        Map<InquiryCategory, Long> byCategory = new LinkedHashMap<>();
+        List<CategorySlice> categories = categoryDistribution(inquiries);
+        List<ProblemProduct> products = problemProducts(inquiries, reviews);
+
+        return new Aggregates(
+                weekStart.toString(),
+                weekEnd.toString(),
+                summary(inquiries, reviews, categories),
+                categories,
+                returnReasonsTop5(inquiries, reviews),
+                products,
+                copySuggestions(products));
+    }
+
+    /** 카테고리별 문의 건수 — 많은 순 */
+    private static List<CategorySlice> categoryDistribution(List<Inquiry> inquiries) {
+        Map<InquiryCategory, Long> counts = new LinkedHashMap<>();
         for (Inquiry inquiry : inquiries) {
             InquiryCategory category = inquiry.getCategory() == null
                     ? InquiryCategory.OTHER : inquiry.getCategory();
-            byCategory.merge(category, 1L, Long::sum);
+            counts.merge(category, 1L, Long::sum);
         }
-        List<Map<String, Object>> categoryDistribution = byCategory.entrySet().stream()
+        return counts.entrySet().stream()
                 .sorted(Map.Entry.<InquiryCategory, Long>comparingByValue().reversed())
-                .map(entry -> Map.<String, Object>of(
-                        "category", entry.getKey().name(),
-                        "label", entry.getKey().getLabel(),
-                        "count", entry.getValue()))
+                .map(entry -> new CategorySlice(
+                        entry.getKey().name(), entry.getKey().getLabel(), entry.getValue()))
                 .toList();
+    }
 
-        // 2) 반품 사유 TOP5 — 교환/반품 문의 + 부정 리뷰를 함께 분석
+    /** 반품 사유 TOP5 — 교환/반품 문의와 부정 리뷰를 함께 분석 */
+    private static List<ReturnReason> returnReasonsTop5(List<Inquiry> inquiries, List<Review> reviews) {
         Map<String, Long> reasons = new LinkedHashMap<>();
         for (Inquiry inquiry : inquiries) {
             if (inquiry.getCategory() == InquiryCategory.EXCHANGE_RETURN) {
@@ -128,13 +188,15 @@ public class ReportService {
                 reasons.merge(returnReasonOf(review.getContent()), 1L, Long::sum);
             }
         }
-        List<Map<String, Object>> returnReasonsTop5 = reasons.entrySet().stream()
+        return reasons.entrySet().stream()
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                .limit(5)
-                .map(entry -> Map.<String, Object>of("reason", entry.getKey(), "count", entry.getValue()))
+                .limit(RETURN_REASON_LIMIT)
+                .map(entry -> new ReturnReason(entry.getKey(), entry.getValue()))
                 .toList();
+    }
 
-        // 3) 문제 상품 — 부정 피드백(부정 리뷰 + 교환/반품 문의)이 집중된 상품
+    /** 부정 피드백(부정 리뷰 + 교환/반품 문의)이 집중된 상품 */
+    private static List<ProblemProduct> problemProducts(List<Inquiry> inquiries, List<Review> reviews) {
         Map<String, ProductIssue> products = new LinkedHashMap<>();
         for (Review review : reviews) {
             if (review.getProductName() == null) {
@@ -156,43 +218,41 @@ public class ReportService {
                 issue.addKeywords("교환/반품");
             }
         }
-        List<Map<String, Object>> problemProducts = products.values().stream()
+        return products.values().stream()
                 .filter(issue -> issue.negativeCount > 0)
                 .sorted(Comparator.comparingLong((ProductIssue issue) -> issue.negativeCount).reversed())
-                .limit(3)
-                .map(ProductIssue::toMap)
+                .limit(PROBLEM_PRODUCT_LIMIT)
+                .map(ProductIssue::toRecord)
                 .toList();
+    }
 
-        // 4) 상세페이지 문구 제안 (규칙 기반 초안 — AI 인사이트가 이를 보강)
-        List<Map<String, Object>> copySuggestions = new ArrayList<>();
-        for (Map<String, Object> product : problemProducts) {
-            String topIssue = (String) product.get("topIssue");
-            copySuggestions.add(Map.of(
-                    "productName", product.get("productName"),
-                    "suggestion", suggestionFor(topIssue)));
-        }
+    /** 문제 상품마다 대표 이슈에 맞는 상세페이지 문구 제안 (AI 인사이트가 이를 보강) */
+    private static List<CopySuggestion> copySuggestions(List<ProblemProduct> products) {
+        return products.stream()
+                .map(product -> new CopySuggestion(
+                        product.productName(), suggestionFor(product.topIssue())))
+                .toList();
+    }
 
+    private static Summary summary(List<Inquiry> inquiries, List<Review> reviews,
+                                   List<CategorySlice> categories) {
         long negativeReviews = reviews.stream()
                 .filter(review -> review.getSentiment() == Sentiment.NEGATIVE).count();
         double avgRating = reviews.isEmpty() ? 0
                 : reviews.stream().mapToInt(Review::getRating).average().orElse(0);
-
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("weekStart", weekStart.toString());
-        payload.put("weekEnd", weekEnd.toString());
-        payload.put("summary", Map.of(
-                "totalInquiries", inquiries.size(),
-                "totalReviews", reviews.size(),
-                "averageRating", Math.round(avgRating * 10) / 10.0,
-                "negativeReviews", negativeReviews,
-                "topCategory", categoryDistribution.isEmpty()
-                        ? "없음" : categoryDistribution.get(0).get("label")));
-        payload.put("categoryDistribution", categoryDistribution);
-        payload.put("returnReasonsTop5", returnReasonsTop5);
-        payload.put("problemProducts", problemProducts);
-        payload.put("copySuggestions", copySuggestions);
-        return payload;
+        return new Summary(
+                inquiries.size(),
+                reviews.size(),
+                roundToTenth(avgRating),
+                negativeReviews,
+                categories.isEmpty() ? "없음" : categories.get(0).label());
     }
+
+    private static double roundToTenth(double value) {
+        return Math.round(value * 10) / 10.0;
+    }
+
+    /* ---------- 규칙 기반 분류 ---------- */
 
     private static String returnReasonOf(String content) {
         if (content == null) {
@@ -232,6 +292,7 @@ public class ReportService {
         };
     }
 
+    /** 집계 중 상품별 누적 상태 — 완성되면 {@link ProblemProduct}로 변환된다 */
     private static final class ProductIssue {
         final String productName;
         long negativeCount;
@@ -254,18 +315,14 @@ public class ReportService {
             }
         }
 
-        Map<String, Object> toMap() {
+        ProblemProduct toRecord() {
             String topIssue = keywords.entrySet().stream()
                     .max(Map.Entry.comparingByValue())
                     .map(Map.Entry::getKey)
                     .orElse("기타");
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("productName", productName);
-            map.put("negativeCount", negativeCount);
-            map.put("averageRating", ratingCount == 0 ? null
-                    : Math.round((double) ratingSum / ratingCount * 10) / 10.0);
-            map.put("topIssue", topIssue);
-            return map;
+            Double averageRating = ratingCount == 0 ? null
+                    : roundToTenth((double) ratingSum / ratingCount);
+            return new ProblemProduct(productName, negativeCount, averageRating, topIssue);
         }
     }
 }

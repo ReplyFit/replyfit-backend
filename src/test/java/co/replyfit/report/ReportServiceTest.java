@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -41,20 +42,24 @@ class ReportServiceTest {
     private static final long USER_ID = 1L;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private WeeklyReportRepository reportRepository;
+    private LlmClient llmClient;
     private InquiryRepository inquiryRepository;
     private ReviewRepository reviewRepository;
     private ReportService service;
 
     @BeforeEach
     void setUp() {
+        reportRepository = mock(WeeklyReportRepository.class);
+        llmClient = mock(LlmClient.class);
         inquiryRepository = mock(InquiryRepository.class);
         reviewRepository = mock(ReviewRepository.class);
         service = new ReportService(
-                mock(WeeklyReportRepository.class),
+                reportRepository,
                 inquiryRepository,
                 reviewRepository,
                 mock(UserRepository.class),
-                mock(LlmClient.class),
+                llmClient,
                 objectMapper);
     }
 
@@ -98,6 +103,13 @@ class ReportServiceTest {
                                 Sentiment.NEGATIVE, "색상", at),
                         // 상품명 없는 리뷰 — null 가드 경로
                         new Review(user, null, 3, "보통이에요", Sentiment.NEUTRAL, null, at)));
+    }
+
+    /** id가 부여된 사용자 — buildAggregates가 getId()로 조회 키를 만든다 */
+    private static User persistedUser() {
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(USER_ID);
+        return user;
     }
 
     private static Inquiry inquiry(User user, String productName, String content, LocalDateTime at) {
@@ -196,6 +208,45 @@ class ReportServiceTest {
                 .containsExactly("크롭 니트 가디건", "린넨 와이드 팬츠");
         // 사이즈 이슈에는 사이즈 가이드 문구가 나가야 한다
         assertThat(suggestions.get(1).path("suggestion").asText()).contains("사이즈 가이드");
+    }
+
+    @Test
+    @DisplayName("generate — 저장되는 최종 payload에 집계 + aiInsights + generatedBy가 모두 담긴다")
+    void generatePayload() throws Exception {
+        givenFixture();
+        WeeklyReport report = new WeeklyReport(persistedUser(), WEEK_START, WEEK_END);
+        when(reportRepository.findById(7L)).thenReturn(Optional.of(report));
+
+        service.generate(7L, "시드 인사이트");
+
+        assertThat(report.getStatus()).isEqualTo(WeeklyReport.Status.READY);
+        JsonNode json = objectMapper.readTree(report.getPayload());
+        assertThat(json.fieldNames()).toIterable().containsExactlyInAnyOrder(
+                "weekStart", "weekEnd", "summary",
+                "categoryDistribution", "returnReasonsTop5",
+                "problemProducts", "copySuggestions",
+                "aiInsights", "generatedBy");
+        assertThat(json.path("aiInsights").asText()).isEqualTo("시드 인사이트");
+        assertThat(json.path("generatedBy").asText()).isEqualTo("seed");
+        // 집계 내용도 그대로 실려야 한다
+        assertThat(json.path("summary").path("totalInquiries").asInt()).isEqualTo(6);
+        assertThat(json.path("problemProducts")).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("generate — LLM 사용 시 generatedBy에 클라이언트 이름이 기록된다")
+    void generateRecordsLlmName() throws Exception {
+        givenFixture();
+        WeeklyReport report = new WeeklyReport(persistedUser(), WEEK_START, WEEK_END);
+        when(reportRepository.findById(7L)).thenReturn(Optional.of(report));
+        when(llmClient.reportInsights(any())).thenReturn("AI 인사이트");
+        when(llmClient.name()).thenReturn("openai:gpt-5-mini");
+
+        service.generate(7L, null);
+
+        JsonNode json = objectMapper.readTree(report.getPayload());
+        assertThat(json.path("aiInsights").asText()).isEqualTo("AI 인사이트");
+        assertThat(json.path("generatedBy").asText()).isEqualTo("openai:gpt-5-mini");
     }
 
     @Test
