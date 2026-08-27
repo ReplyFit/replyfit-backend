@@ -8,7 +8,7 @@ import co.replyfit.inquiry.InquiryCategory;
  * AI 계층 추상화 — LLM API 호출 모듈 + 프롬프트 템플릿 + 정책 검증 로직 (사업계획서 기술 구성 3).
  *
  * 구현체:
- *  - {@link AnthropicLlmClient}: Anthropic Claude API 호출 (ANTHROPIC_API_KEY 필요)
+ *  - {@link OpenAiLlmClient}: OpenAI API 호출 (OPENAI_API_KEY 필요)
  *  - {@link RuleBasedLlmClient}: 키워드/템플릿 기반 폴백 (API 키 없이 동작, 데모·개발용)
  */
 public interface LlmClient {
