@@ -35,6 +35,11 @@ spring:
         spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
         spring.json.trusted.packages: co.replyfit.kafka.event
 
+  lifecycle:
+    # graceful shutdown 최대 대기. ECS 기본 stopTimeout(30s)보다 짧게 잡아
+    # 강제 SIGKILL 전에 정리가 끝나도록 한다.
+    timeout-per-shutdown-phase: 25s
+
   servlet:
     multipart:
       max-file-size: 20MB
@@ -42,6 +47,8 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # 롤링 배포로 컨테이너가 내려갈 때 처리 중이던 요청과 Kafka 메시지를 흘리지 않는다.
+  shutdown: graceful
 
 management:
   endpoints:
