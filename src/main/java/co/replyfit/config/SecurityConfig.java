@@ -43,7 +43,16 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/signup", "/api/auth/login", "/api/auth/refresh",
                                 "/api/auth/logout").permitAll()
                         .requestMatchers("/api/billing/plans").permitAll()
-                        .requestMatchers("/actuator/**", "/swagger-ui/**", "/swagger-ui.html",
+                        // 헬스·정보만 공개한다. prometheus/metrics까지 열면 내부 지표가
+                        // 인증 없이 노출된다(#56).
+                        //
+                        // 주의: 이 체인은 prod의 별도 관리 포트(9090)에도 그대로 적용된다.
+                        // 즉 아래 permitAll이 ALB 타깃 그룹 헬스체크(/actuator/health/readiness)를
+                        // 통과시키는 유일한 근거다. 지우면 헬스체크가 401이 되어 배포가 실패한다.
+                        .requestMatchers("/actuator/health", "/actuator/health/**",
+                                "/actuator/info").permitAll()
+                        // prod 프로필에서는 springdoc이 꺼져 있어 404가 된다.
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
