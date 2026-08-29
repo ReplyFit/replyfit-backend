@@ -47,6 +47,10 @@ dependencies {
     // OpenAPI (Swagger UI)
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
 
+    // 스키마 마이그레이션 — ddl-auto 대신 명시적 버전 관리 (#57)
+    implementation 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     // 실제 PostgreSQL 컨테이너 기반 리포지토리 테스트 (검색 쿼리 회귀 방지)
     testImplementation 'org.springframework.boot:spring-boot-testcontainers'

@@ -8,9 +8,18 @@ spring:
     password: ${DB_PASSWORD:replyfit}
     driver-class-name: org.postgresql.Driver
 
+  flyway:
+    enabled: true
+    # ddl-auto=update로 이미 스키마가 만들어진 기존 DB를 위한 설정.
+    # 스키마가 비어 있지 않은데 이력 테이블이 없으면 V1을 적용된 것으로 간주하고
+    # V2부터 진행한다. 빈 DB에는 영향이 없어 V1부터 정상 적용된다.
+    baseline-on-migrate: true
+    baseline-version: 1
+
   jpa:
     hibernate:
-      ddl-auto: update
+      # 스키마는 Flyway가 관리한다. 엔티티와 실제 스키마가 어긋나면 기동을 거부한다(#57).
+      ddl-auto: validate
     open-in-view: false
     properties:
       hibernate:
