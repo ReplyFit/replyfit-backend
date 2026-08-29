@@ -1,0 +1,129 @@
+name: Deploy
+
+# v* 태그를 밀면 ECR에 이미지를 올리고 ECS 서비스를 갱신한다.
+# 장기 액세스 키 대신 GitHub OIDC로 IAM 역할을 수임한다 — 저장소에는
+# 역할 ARN만 남고, 그것만으로는 아무 권한이 없다.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "배포할 이미지 태그 (비우면 커밋 SHA)"
+        required: false
+        type: string
+
+permissions:
+  id-token: write # OIDC 토큰 발급에 필요
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'replyfit/backend' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'replyfit-prod' }}
+
+jobs:
+  deploy:
+    name: ECR 푸시 & ECS 배포
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 필수 설정 확인
+        # 없으면 뒤에서 인증 오류로 나타나 원인을 찾기 어렵다. 여기서 먼저 끊는다.
+        run: |
+          if [ -z "${{ secrets.AWS_ROLE_ARN }}" ]; then
+            echo "::error::저장소 시크릿 AWS_ROLE_ARN이 없습니다."
+            echo "::error::terraform output github_actions_role_arn 값을 넣으세요."
+            exit 1
+          fi
+
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 이미지 태그 결정
+        id: meta
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAG="${{ inputs.image_tag }}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="${GITHUB_SHA::12}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "배포 태그: ${TAG}"
+
+      - name: AWS 자격 증명 (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR 로그인
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Buildx 준비
+        uses: docker/setup-buildx-action@v3
+
+      - name: 이미지 빌드 & 푸시
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # api와 worker가 같은 이미지를 쓰지만 태스크 정의가 달라 각각 갱신한다.
+      - name: 태스크 정의 갱신 & 배포
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          for SERVICE in backend-api backend-worker; do
+            FAMILY="${ECS_CLUSTER}-${SERVICE}"
+            echo "::group::${SERVICE}"
+
+            # describe 결과에는 register 시 넣을 수 없는 필드가 섞여 있어 걷어낸다.
+            aws ecs describe-task-definition --task-definition "$FAMILY" \
+              --query 'taskDefinition' \
+            | jq --arg IMAGE "$IMAGE" '
+                .containerDefinitions[0].image = $IMAGE
+                | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                      .compatibilities, .registeredAt, .registeredBy)
+              ' > task-def.json
+
+            REVISION=$(aws ecs register-task-definition \
+              --cli-input-json file://task-def.json \
+              --query 'taskDefinition.taskDefinitionArn' --output text)
+            echo "새 리비전: ${REVISION}"
+
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER" --service "$SERVICE" \
+              --task-definition "$REVISION" > /dev/null
+            echo "::endgroup::"
+          done
+
+      - name: 서비스 안정화 대기
+        # 여기서 기다리지 않으면 배포가 실패해도 워크플로는 초록으로 끝난다.
+        # Terraform 쪽 배포 서킷 브레이커가 실패 시 이전 리비전으로 되돌린다.
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services backend-api backend-worker
+
+      - name: 결과 요약
+        if: always()
+        run: |
+          {
+            echo "### 배포 결과"
+            echo ""
+            echo "- 이미지 태그: \`${{ steps.meta.outputs.tag }}\`"
+            echo "- 클러스터: \`${ECS_CLUSTER}\`"
+            echo "- 서비스: \`backend-api\`, \`backend-worker\`"
+          } >> "$GITHUB_STEP_SUMMARY"
